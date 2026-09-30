@@ -82,21 +82,59 @@ function findBeatOffset(envelope: Float32Array, bpm: number, framesPerSecond: nu
 }
 
 function estimatePitch(samples: Float32Array, start: number, sampleRate: number) {
-  // Skip the pick/transient edge; its broadband ringing is not the played pitch.
+  // Skip the pick transient, then use autocorrelation so distortion harmonics do not
+  // masquerade as the fundamental as readily as zero-crossing counts do.
+  const stride = Math.max(1, Math.round(sampleRate / 6_000))
+  const effectiveRate = sampleRate / stride
   const offset = Math.min(samples.length - 1, start + Math.round(sampleRate * 0.02))
-  const end = Math.min(samples.length, offset + Math.round(sampleRate * 0.06))
+  const crossingEnd = Math.min(samples.length, offset + Math.round(sampleRate * 0.06))
   let crossings = 0
-  let previous = samples[offset] ?? 0
+  for (let index = offset + 1; index < crossingEnd; index += 1) {
+    if (samples[index - 1] <= 0 && samples[index] > 0) crossings += 1
+  }
+  const crossingPitchHz = crossings / Math.max((crossingEnd - offset) / sampleRate, 0.0001)
+  const end = Math.min(samples.length, offset + Math.round(sampleRate * 0.1))
+  const values: number[] = []
+  for (let index = offset; index < end; index += stride) values.push(samples[index])
+  const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1)
+  for (let index = 0; index < values.length; index += 1) values[index] -= mean
 
-  for (let index = offset + 1; index < end; index += 1) {
-    const sample = samples[index]
-    if (previous <= 0 && sample > 0) crossings += 1
-    previous = sample
+  const minimumLag = Math.max(2, Math.floor(effectiveRate / 1_200))
+  const maximumLag = Math.min(values.length - 2, Math.ceil(effectiveRate / 70))
+  const scores = new Float32Array(maximumLag + 1)
+  let bestLag = minimumLag
+  let bestScore = -1
+
+  for (let lag = minimumLag; lag <= maximumLag; lag += 1) {
+    let correlation = 0
+    let energyA = 0
+    let energyB = 0
+    for (let index = 0; index < values.length - lag; index += 1) {
+      correlation += values[index] * values[index + lag]
+      energyA += values[index] * values[index]
+      energyB += values[index + lag] * values[index + lag]
+    }
+    const score = correlation / Math.sqrt(Math.max(energyA * energyB, 0.000001))
+    scores[lag] = score
+    if (score > bestScore) {
+      bestScore = score
+      bestLag = lag
+    }
   }
 
-  const seconds = (end - offset) / sampleRate
-  const pitchHz = seconds > 0 ? crossings / seconds : 0
+  const peakThreshold = Math.max(0.35, bestScore * 0.85)
+  for (let lag = minimumLag + 1; lag < maximumLag; lag += 1) {
+    if (scores[lag] >= peakThreshold && scores[lag] >= scores[lag - 1] && scores[lag] > scores[lag + 1]) {
+      bestLag = lag
+      bestScore = scores[lag]
+      break
+    }
+  }
+
+  const pitchHz = effectiveRate / Math.max(bestLag, 1)
   return {
+    confidence: bestScore,
+    crossingPitchHz,
     pitchHz,
     register: clamp(Math.log2(Math.max(82, pitchHz) / 82) / 4, 0, 1),
   }
@@ -206,7 +244,8 @@ export function analyzeSignal(
     }
 
     const pitch = estimatePitch(focused, frame * hopSize, sampleRate)
-    if (pitch.pitchHz < 70 || pitch.pitchHz > 2_400) continue
+    if (pitch.crossingPitchHz < 70 || pitch.crossingPitchHz > 2_400) continue
+    const register = pitch.confidence >= 0.35 ? pitch.register : (attacks.at(-1)?.register ?? 0.5)
 
     const sustainFloor = Math.max(maxEnergy * 0.025, energy[frame] * 0.28)
     let sustainEnd = frame + 1
@@ -217,7 +256,7 @@ export function analyzeSignal(
       timeMs: (frame / framesPerSecond) * 1_000,
       durationMs: ((sustainEnd - frame) / framesPerSecond) * 1_000,
       strength: clamp(envelope[frame] * (0.7 + Math.min(guitarShare, 1) * 0.3), 0, 1),
-      register: pitch.register,
+      register,
     })
     lastPeak = frame
   }

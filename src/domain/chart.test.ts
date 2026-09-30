@@ -46,16 +46,26 @@ describe('generateChart', () => {
   it('reuses a repeated motif mapping and preserves ascending contour', () => {
     const repeated = chartFor([
       note(0, 0.2), note(250, 0.5), note(500, 0.8),
-      note(1_500, 0.1), note(1_750, 0.4), note(2_000, 0.7),
+      note(1_500, 0.1), note(1_625, 0.25, 0.4), note(1_750, 0.4), note(2_000, 0.7),
     ]).tracks.expert.notes
-    expect(repeated.slice(0, 3).map((event) => event.lanes)).toEqual(
-      repeated.slice(3).map((event) => event.lanes),
-    )
+    const firstMotif = repeated.slice(0, 3).map((event) => event.lanes[0])
+    const secondMotif = repeated.slice(3).map((event) => event.lanes[0])
+    expect([secondMotif[0], secondMotif.at(-1)]).toEqual([firstMotif[0], firstMotif.at(-1)])
+    expect(secondMotif.slice(1).every((lane, index) => Math.abs(lane - secondMotif[index]) <= 1)).toBe(true)
 
     const ascending = chartFor([
       note(0, 0.1), note(250, 0.3), note(500, 0.5), note(750, 0.7), note(1_000, 0.9),
     ]).tracks.expert.notes.map((event) => event.lanes[0])
     expect(ascending).toEqual([...ascending].sort((a, b) => a - b))
+  })
+
+  it('smooths noisy register evidence without unexplained outer-lane jumps', () => {
+    const registers = [0.98, 1, 1, 0.92, 1, 0.52, 0.96, 0.48, 0.93, 0.5, 0.9, 0.54]
+    const chart = chartFor(registers.map((register, index) => note(index * 115, register, 0.75)))
+    const expertLanes = chart.tracks.expert.notes.map((event) => event.lanes[0])
+
+    expect(expertLanes.slice(1).every((lane, index) => Math.abs(lane - expertLanes[index]) <= 2)).toBe(true)
+    expect(chart.tracks.hard.notes.length).toBeLessThan(chart.tracks.expert.notes.length)
   })
 
   it('selects one coherent guitar voice for a phrase', () => {
@@ -90,10 +100,10 @@ describe('generateChart', () => {
 
     const reduced = chartFor([
       note(0, 0.1, 0.9),
-      note(125, 0.3, 0.1),
-      note(250, 0.5, 0.9),
-      note(375, 0.7, 0.1),
-      note(500, 0.9, 0.9),
+      note(150, 0.3, 0.1),
+      note(300, 0.5, 0.9),
+      note(450, 0.7, 0.1),
+      note(600, 0.9, 0.9),
     ]).tracks.medium.notes
     expect(reduced.map((event) => event.lanes[0])).toEqual([0, 1, 2])
   })
@@ -132,13 +142,14 @@ describe('transcribe', () => {
       beatOffsetMs: 20,
       attacks: [
         { timeMs: 31, strength: 0.9, register: 0.2 },
+        { timeMs: 205, strength: 0.8, register: 0.5 },
         { timeMs: 418, strength: 0.7, register: 0.8 },
       ],
       waveform: [],
     }
 
     const notes = transcribe(features)
-    expect(notes.map((event) => event.timeMs)).toEqual([20, 395])
+    expect(notes.map((event) => event.timeMs)).toEqual([20, 205, 395])
     expect(notes[0].beatPosition).toBe(0)
     expect(notes.every((event) => !('lanes' in event))).toBe(true)
   })

@@ -50,25 +50,25 @@ type DifficultyConfig = {
 const CONFIG: Record<Difficulty, DifficultyConfig> = {
   easy: {
     lanes: 3,
-    minGapBeats: 0.9,
-    minGapMs: 320,
-    minStrength: 0.34,
+    minGapBeats: 0.95,
+    minGapMs: 360,
+    minStrength: 0.66,
     maxChordWidth: 1,
     releaseGapMs: 100,
   },
   medium: {
     lanes: 4,
-    minGapBeats: 0.42,
-    minGapMs: 190,
-    minStrength: 0.22,
+    minGapBeats: 0.58,
+    minGapMs: 220,
+    minStrength: 0.56,
     maxChordWidth: 2,
     releaseGapMs: 85,
   },
   hard: {
     lanes: 5,
-    minGapBeats: 0.23,
-    minGapMs: 105,
-    minStrength: 0.12,
+    minGapBeats: 0.3,
+    minGapMs: 115,
+    minStrength: 0.48,
     maxChordWidth: 2,
     releaseGapMs: 75,
   },
@@ -76,7 +76,7 @@ const CONFIG: Record<Difficulty, DifficultyConfig> = {
     lanes: 5,
     minGapBeats: 0.12,
     minGapMs: 58,
-    minStrength: 0.06,
+    minStrength: 0.4,
     maxChordWidth: 3,
     releaseGapMs: 70,
   },
@@ -95,7 +95,7 @@ function splitPhrases(notes: MusicalNote[], beatMs: number) {
     const derivedBoundary =
       previous !== undefined &&
       (note.timeMs - previous.timeMs > Math.max(650, beatMs * 1.5) ||
-        note.beatPosition - (phrase?.[0]?.beatPosition ?? note.beatPosition) >= 8)
+        note.beatPosition - (phrase?.[0]?.beatPosition ?? note.beatPosition) >= 4)
 
     if (!phrase || suppliedBoundary || derivedBoundary) phrases.push([note])
     else phrase.push(note)
@@ -174,23 +174,35 @@ function pitchLevel(note: MusicalNote) {
   return Math.round(clamp(note.register, 0, 1) * 12)
 }
 
+function smoothedPitchLevels(notes: MusicalNote[]) {
+  const levels = notes.map(pitchLevel)
+  return levels.map((level, index) => {
+    if (index === 0 || index === levels.length - 1 || notes[index].strength >= 0.78) return level
+    const window = [levels[index - 1], level, levels[index + 1]]
+      .filter((value): value is number => value !== undefined)
+      .sort((a, b) => a - b)
+    return window[Math.floor(window.length / 2)]
+  })
+}
+
 function motifKey(notes: MusicalNote[]) {
-  const intervals = notes.slice(1).map((note, index) =>
-    Math.round((note.beatPosition - notes[index].beatPosition) * 8),
-  )
-  const contour = notes.slice(1).map((note, index) =>
-    Math.sign(pitchLevel(note) - pitchLevel(notes[index])),
-  )
-  const harmony = notes.map((note) =>
-    note.harmonicConfidence === undefined
-      ? '?'
-      : note.harmonicConfidence >= 0.9
-        ? '3'
-        : note.harmonicConfidence >= 0.68
-          ? '2'
-          : '1',
-  )
-  return `${notes.length}|${intervals.join(',')}|${contour.join(',')}|${harmony.join('')}`
+  if (notes.length === 0) return 'empty'
+  const levels = smoothedPitchLevels(notes)
+  const contour = levels
+    .slice(1)
+    .map((level, index) => Math.sign(level - levels[index]))
+    .filter((direction) => direction !== 0)
+    .filter((direction, index, directions) => direction !== directions[index - 1])
+  const duration = Math.round((notes.at(-1)!.beatPosition - notes[0].beatPosition) * 2)
+  const accentBins = [0, 0, 0, 0]
+  const span = Math.max(notes.at(-1)!.timeMs - notes[0].timeMs, 1)
+  for (const note of notes) {
+    if (note.strength >= 0.72) {
+      accentBins[Math.min(3, Math.floor(((note.timeMs - notes[0].timeMs) / span) * 4))] = 1
+    }
+  }
+  const harmony = notes.some((note) => (note.harmonicConfidence ?? 0) >= 0.68) ? 'chord' : 'single'
+  return `${duration}|${contour.join(',')}|${accentBins.join('')}|${harmony}`
 }
 
 function mapPhraseLanes(
@@ -200,15 +212,40 @@ function mapPhraseLanes(
 ) {
   const key = motifKey(notes)
   const remembered = motifMappings.get(key)
-  if (remembered?.length === notes.length) return [...remembered]
+  if (remembered?.length) {
+    if (notes.length === 1) return [remembered[0]]
+    return notes.map((_, index) =>
+      remembered[Math.round((index / (notes.length - 1)) * (remembered.length - 1))],
+    )
+  }
 
-  const levels = notes.map(pitchLevel)
-  const uniqueLevels = [...new Set(levels)].sort((a, b) => a - b)
-  const start = uniqueLevels.length <= laneCount ? Math.floor((laneCount - uniqueLevels.length) / 2) : 0
-  const lanes = levels.map((level) => {
-    const rank = uniqueLevels.indexOf(level)
-    return (uniqueLevels.length <= laneCount ? start + rank : rank % laneCount) as Lane
-  })
+  const levels = smoothedPitchLevels(notes)
+  const netMotion = levels.slice(1).reduce((sum, level, index) => sum + Math.sign(level - levels[index]), 0)
+  const center = Math.floor((laneCount - 1) / 2)
+  let current = clamp(center + (netMotion > 0 ? -1 : netMotion < 0 ? 1 : 0), 0, laneCount - 1)
+  const lanes: Lane[] = []
+  const laneByLevel = new Map<number, number>()
+
+  for (let index = 0; index < levels.length; index += 1) {
+    const level = levels[index]
+    if (index > 0) {
+      const delta = level - levels[index - 1]
+      const gapBeats = notes[index].beatPosition - notes[index - 1].beatPosition
+      const maximumStep = gapBeats >= 1 ? 2 : 1
+      const rememberedLane = laneByLevel.get(level)
+      if (rememberedLane !== undefined) {
+        current += clamp(rememberedLane - current, -maximumStep, maximumStep)
+      } else if (Math.abs(delta) >= 2) {
+        const desiredStep = Math.abs(delta) >= 5 && gapBeats >= 0.5 ? 2 : 1
+        current += Math.sign(delta) * Math.min(desiredStep, maximumStep)
+      }
+      current = clamp(current, 0, laneCount - 1)
+    }
+
+    lanes.push(current as Lane)
+    if (!laneByLevel.has(level)) laneByLevel.set(level, current)
+  }
+
   motifMappings.set(key, lanes)
   return lanes
 }

@@ -66,7 +66,8 @@ export function transcribe(features: AudioFeatures): MusicalNote[] {
   return deduplicated.map((feature, index) => {
     const gridIndex = Math.round((feature.timeMs - features.beatOffsetMs) / sixteenthMs)
     const gridTime = features.beatOffsetMs + gridIndex * sixteenthMs
-    const timeMs = Math.abs(feature.timeMs - gridTime) <= 72 ? gridTime : feature.timeMs
+    const snapTolerance = Math.min(36, sixteenthMs * 0.24)
+    const timeMs = Math.abs(feature.timeMs - gridTime) <= snapTolerance ? gridTime : feature.timeMs
     const nextTime = deduplicated[index + 1]?.timeMs ?? features.durationMs
 
     return {
