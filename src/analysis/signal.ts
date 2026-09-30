@@ -218,7 +218,6 @@ export function analyzeSignal(
       durationMs: ((sustainEnd - frame) / framesPerSecond) * 1_000,
       strength: clamp(envelope[frame] * (0.7 + Math.min(guitarShare, 1) * 0.3), 0, 1),
       register: pitch.register,
-      pitchHz: pitch.pitchHz,
     })
     lastPeak = frame
   }

@@ -1,59 +1,130 @@
 import { describe, expect, it } from 'vitest'
-import { RhythmicTranscriber, type AudioFeatures } from '../analysis/pipeline'
+import { transcribe, type AudioFeatures } from '../analysis/pipeline'
 import {
   DIFFICULTIES,
-  PlayableChartGenerator,
+  generateChart,
   validateChart,
   type MusicalNote,
 } from './chart'
 
-const musicalNotes = Array.from({ length: 64 }, (_, index): MusicalNote => ({
-  timeMs: index * 125,
-  durationMs: index % 8 === 0 ? 420 : 0,
-  strength: index % 4 === 0 ? 0.92 : 0.36,
-  register: (index % 10) / 9,
-  beatPosition: index / 4,
-}))
+const note = (
+  timeMs: number,
+  register: number,
+  strength = 0.7,
+  extra: Partial<MusicalNote> = {},
+): MusicalNote => ({
+  timeMs,
+  durationMs: 0,
+  strength,
+  register,
+  beatPosition: timeMs / 500,
+  ...extra,
+})
 
-describe('PlayableChartGenerator', () => {
-  const chart = new PlayableChartGenerator().generate({
-    title: 'Synthetic Riff',
-    durationMs: 9_000,
-    bpm: 120,
-    beatOffsetMs: 0,
-    notes: musicalNotes,
-  })
+const chartFor = (notes: MusicalNote[], durationMs = (notes.at(-1)?.timeMs ?? 0) + 1_000) =>
+  generateChart({ durationMs, bpm: 120, beatOffsetMs: 0, notes })
 
-  it('builds increasingly detailed, valid tracks for all four difficulties', () => {
-    expect(Object.keys(chart.tracks)).toEqual([...DIFFICULTIES])
+describe('generateChart', () => {
+  it('builds valid, monotonically simpler tracks within each lane limit', () => {
+    const notes = Array.from({ length: 64 }, (_, index) =>
+      note(index * 125, (index % 10) / 9, index % 4 === 0 ? 0.92 : 0.36),
+    )
+    const chart = chartFor(notes, 9_000)
     const counts = DIFFICULTIES.map((difficulty) => chart.tracks[difficulty].notes.length)
+    const widths = DIFFICULTIES.map((difficulty) =>
+      Math.max(...chart.tracks[difficulty].notes.map((event) => event.lanes.length), 0),
+    )
+
     expect(counts[0]).toBeGreaterThan(0)
     expect(counts).toEqual([...counts].sort((a, b) => a - b))
-    expect(new Set(counts).size).toBeGreaterThan(2)
+    expect(widths).toEqual([...widths].sort((a, b) => a - b))
+    expect(chart.tracks.easy.notes.every((event) => event.lanes.every((lane) => lane <= 2))).toBe(true)
+    expect(chart.tracks.medium.notes.every((event) => event.lanes.every((lane) => lane <= 3))).toBe(true)
     expect(validateChart(chart)).toEqual([])
   })
 
-  it('keeps easier charts readable and reserves chords for harder charts', () => {
-    expect(chart.tracks.easy.notes.every((note) => note.lanes.every((lane) => lane <= 2))).toBe(true)
-    expect(chart.tracks.easy.notes.every((note) => note.lanes.length === 1)).toBe(true)
-    expect(chart.tracks.medium.notes.every((note) => note.lanes.every((lane) => lane <= 3))).toBe(true)
-    expect(new Set(chart.tracks.expert.notes.flatMap((note) => note.lanes))).toEqual(new Set([0, 1, 2, 3, 4]))
-    expect(chart.tracks.expert.notes.some((note) => note.lanes.length === 2)).toBe(true)
+  it('reuses a repeated motif mapping and preserves ascending contour', () => {
+    const repeated = chartFor([
+      note(0, 0.2), note(250, 0.5), note(500, 0.8),
+      note(1_500, 0.1), note(1_750, 0.4), note(2_000, 0.7),
+    ]).tracks.expert.notes
+    expect(repeated.slice(0, 3).map((event) => event.lanes)).toEqual(
+      repeated.slice(3).map((event) => event.lanes),
+    )
+
+    const ascending = chartFor([
+      note(0, 0.1), note(250, 0.3), note(500, 0.5), note(750, 0.7), note(1_000, 0.9),
+    ]).tracks.expert.notes.map((event) => event.lanes[0])
+    expect(ascending).toEqual([...ascending].sort((a, b) => a - b))
   })
 
-  it('is deterministic for the same musical transcription', () => {
-    const rerun = new PlayableChartGenerator().generate({
-      title: 'Synthetic Riff',
-      durationMs: 9_000,
-      bpm: 120,
-      beatOffsetMs: 0,
-      notes: musicalNotes,
-    })
-    expect(rerun).toEqual(chart)
+  it('selects one coherent guitar voice for a phrase', () => {
+    const expert = chartFor([
+      note(0, 0.2, 0.45, { voiceId: 'rhythm' }),
+      note(125, 0.6, 0.9, { voiceId: 'lead' }),
+      note(500, 0.3, 0.45, { voiceId: 'rhythm' }),
+      note(625, 0.8, 0.9, { voiceId: 'lead' }),
+    ]).tracks.expert.notes
+
+    expect(expert.map((event) => event.timeMs)).toEqual([125, 625])
+  })
+
+  it('reduces an explicitly supported emphatic chord by difficulty', () => {
+    const chart = chartFor([
+      note(0, 0.5, 0.96, { harmonicConfidence: 0.96 }),
+    ])
+
+    expect(chart.tracks.expert.notes[0].lanes).toHaveLength(3)
+    expect(chart.tracks.hard.notes[0].lanes).toHaveLength(2)
+    expect(chart.tracks.medium.notes[0].lanes).toHaveLength(2)
+    expect(chart.tracks.easy.notes[0].lanes).toHaveLength(1)
+  })
+
+  it('keeps an identity-defining upbeat and remaps reduced contours', () => {
+    const syncopated = chartFor([
+      note(0, 0.2, 0.25),
+      note(250, 0.5, 0.95),
+      note(500, 0.8, 0.25),
+    ]).tracks.easy.notes
+    expect(syncopated.map((event) => event.timeMs)).toEqual([250])
+
+    const reduced = chartFor([
+      note(0, 0.1, 0.9),
+      note(125, 0.3, 0.1),
+      note(250, 0.5, 0.9),
+      note(375, 0.7, 0.1),
+      note(500, 0.9, 0.9),
+    ]).tracks.medium.notes
+    expect(reduced.map((event) => event.lanes[0])).toEqual([0, 1, 2])
+  })
+
+  it('repairs sustains and only marks evidenced, different-lane legato as HOPO', () => {
+    const sustained = chartFor([
+      note(0, 0.2, 0.9, { durationMs: 430 }),
+      note(600, 0.5, 0.9),
+    ], 1_500)
+    for (const difficulty of DIFFICULTIES) {
+      const [held, next] = sustained.tracks[difficulty].notes
+      expect(held.durationMs).toBeGreaterThanOrEqual(200)
+      expect(next.timeMs - held.timeMs - held.durationMs).toBeGreaterThanOrEqual(60)
+    }
+
+    const legato = chartFor([
+      note(0, 0.2, 0.9),
+      note(250, 0.5, 0.9, { legatoConfidence: 0.9 }),
+      note(500, 0.5, 0.9, { legatoConfidence: 0.9 }),
+    ], 1_500)
+    const expert = legato.tracks.expert.notes
+    expect(expert[1].articulation).toBe('hopo')
+    expect(expert[2].articulation).toBe('strum')
+    expect(legato.tracks.medium.notes.every((event) => event.articulation === 'strum')).toBe(true)
+    expect(legato.tracks.easy.notes.every((event) => event.articulation === 'strum')).toBe(true)
+    expect(validateChart(sustained)).toEqual([])
+    expect(validateChart(legato)).toEqual([])
   })
 })
 
-describe('RhythmicTranscriber', () => {
+describe('transcribe', () => {
   it('quantizes detected guitar attacks and stays format-neutral', () => {
     const features: AudioFeatures = {
       durationMs: 2_000,
@@ -66,21 +137,13 @@ describe('RhythmicTranscriber', () => {
       waveform: [],
     }
 
-    const notes = new RhythmicTranscriber().transcribe(features)
-    expect(notes.map((note) => note.timeMs)).toEqual([20, 395])
+    const notes = transcribe(features)
+    expect(notes.map((event) => event.timeMs)).toEqual([20, 395])
     expect(notes[0].beatPosition).toBe(0)
-    expect(notes.every((note) => !('lanes' in note))).toBe(true)
+    expect(notes.every((event) => !('lanes' in event))).toBe(true)
   })
 
   it('does not invent guitar notes when analysis detects no attacks', () => {
-    const notes = new RhythmicTranscriber().transcribe({
-      durationMs: 2_000,
-      bpm: 120,
-      beatOffsetMs: 0,
-      attacks: [],
-      waveform: [],
-    })
-
-    expect(notes).toEqual([])
+    expect(transcribe({ durationMs: 2_000, bpm: 120, beatOffsetMs: 0, attacks: [], waveform: [] })).toEqual([])
   })
 })

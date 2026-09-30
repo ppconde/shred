@@ -35,12 +35,14 @@ The transport also provides seek, volume, and playback-speed controls. Click the
 
 ## Current architecture
 
-- `src/analysis/pipeline.ts` defines replaceable analyzer, transcription, and chart-generator boundaries. Beat confidence aligns detected attacks but never fabricates guitar notes.
+- `src/analysis/pipeline.ts` runs the worker, transcribes detected attacks, and passes format-neutral guitar events into generation. Beat confidence aligns real attacks but never fabricates notes.
 - `src/analysis/signal.ts` preserves both stereo channels in a mono analysis mix, applies a lightweight guitar-range filter, rejects out-of-range transients, estimates register, and finds pulse/attacks locally. `analysis.worker.ts` keeps the signal scan off the UI thread.
-- `src/domain/chart.ts` owns the format-neutral musical-note and five-lane chart models, difficulty mapping, playability constraints, and validation.
-- `src/components/Highway.tsx` is a React Three Fiber/WebGL scene; `Waveform.tsx` is a lightweight 2D timeline. Their playhead comes only from `HTMLAudioElement.currentTime`; they do not maintain a competing playback clock.
+- `src/domain/chart.ts` groups events into phrases, selects one known voice, remembers repeated-motif lane mappings, builds Expert, then musically selects and remaps each lower difficulty. It also owns chord, sustain, articulation, playability, and validation rules independent of serialization.
+- `src/components/Highway.tsx` and `Waveform.tsx` are lightweight Canvas2D views. Their playhead comes only from `HTMLAudioElement.currentTime`; they do not maintain a competing playback clock.
 
-The analyzer is intentionally lightweight rather than an ML transcription system. It favors a stable rhythmic interpretation, restrained density, quantization near the inferred beat grid, simple melodic contours, and selective accents/chords. Its guitar-focus pass suppresses much of the bass and cymbal range, but it is **not stem separation**: reliable guitar isolation from a finished mix needs a substantially larger ML/WASM source-separation model. A guitar stem or guitar-forward mix will produce the cleanest chart.
+The analyzer is intentionally lightweight rather than an ML transcription system. It favors a stable rhythmic interpretation, restrained density, quantization near the inferred beat grid, phrase contour, and repeated-riff consistency. Its guitar-focus pass suppresses much of the bass and cymbal range, but it is **not stem separation**: reliable guitar isolation from a finished mix needs a substantially larger ML/WASM source-separation model. A guitar stem or guitar-forward mix will produce the cleanest chart.
+
+The current signal pass cannot reliably identify separate guitar voices, full-harmony attacks, muting, or legato. Those event fields stay unknown in normal uploads, so generation does not invent chords or HOPOs; the phrase/voice/chord/articulation rules activate only when a future analyzer supplies evidence.
 
 ## Milestone boundary
 

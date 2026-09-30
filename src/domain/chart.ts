@@ -2,15 +2,20 @@ export const DIFFICULTIES = ['easy', 'medium', 'hard', 'expert'] as const
 
 export type Difficulty = (typeof DIFFICULTIES)[number]
 export type Lane = 0 | 1 | 2 | 3 | 4
+export type NoteArticulation = 'strum' | 'hopo'
 
-/** A musical event inferred from the recording, before any game-specific mapping. */
+/** A guitar event inferred from the recording, before any game-specific mapping. */
 export interface MusicalNote {
   timeMs: number
   durationMs: number
   strength: number
   register: number
-  pitchHz?: number
   beatPosition: number
+  voiceId?: string
+  harmonicConfidence?: number
+  mutedConfidence?: number
+  legatoConfidence?: number
+  phraseId?: string | number
 }
 
 /** A five-lane performance note. This model deliberately has no file-format concerns. */
@@ -19,167 +24,315 @@ export interface ChartNote {
   durationMs: number
   lanes: Lane[]
   accent: boolean
+  articulation: NoteArticulation
 }
 
 export interface DifficultyTrack {
-  difficulty: Difficulty
   notes: ChartNote[]
 }
 
 export interface SongChart {
-  title: string
   durationMs: number
   bpm: number
   beatOffsetMs: number
   tracks: Record<Difficulty, DifficultyTrack>
 }
 
-export interface ChartGenerator {
-  generate(input: {
-    title: string
-    durationMs: number
-    bpm: number
-    beatOffsetMs: number
-    notes: MusicalNote[]
-  }): SongChart
+type DifficultyConfig = {
+  lanes: number
+  minGapBeats: number
+  minGapMs: number
+  minStrength: number
+  maxChordWidth: number
+  releaseGapMs: number
 }
 
-const CONFIG: Record<
-  Difficulty,
-  {
-    lanes: number
-    subdivisions: number
-    minGapMs: number
-    minStrength: number
-    rescueGapBeats: number
-    chordStrength: number
-    minSustainMs: number
-  }
-> = {
+const CONFIG: Record<Difficulty, DifficultyConfig> = {
   easy: {
     lanes: 3,
-    subdivisions: 1,
+    minGapBeats: 0.9,
     minGapMs: 320,
-    minStrength: 0.42,
-    rescueGapBeats: 2,
-    chordStrength: 2,
-    minSustainMs: 360,
+    minStrength: 0.34,
+    maxChordWidth: 1,
+    releaseGapMs: 100,
   },
   medium: {
     lanes: 4,
-    subdivisions: 2,
-    minGapMs: 220,
-    minStrength: 0.3,
-    rescueGapBeats: 1.5,
-    chordStrength: 2,
-    minSustainMs: 300,
+    minGapBeats: 0.42,
+    minGapMs: 190,
+    minStrength: 0.22,
+    maxChordWidth: 2,
+    releaseGapMs: 85,
   },
   hard: {
     lanes: 5,
-    subdivisions: 4,
-    minGapMs: 125,
-    minStrength: 0.2,
-    rescueGapBeats: 1,
-    chordStrength: 0.84,
-    minSustainMs: 240,
+    minGapBeats: 0.23,
+    minGapMs: 105,
+    minStrength: 0.12,
+    maxChordWidth: 2,
+    releaseGapMs: 75,
   },
   expert: {
     lanes: 5,
-    subdivisions: 4,
-    minGapMs: 72,
-    minStrength: 0.08,
-    rescueGapBeats: 0.75,
-    chordStrength: 0.68,
-    minSustainMs: 180,
+    minGapBeats: 0.12,
+    minGapMs: 58,
+    minStrength: 0.06,
+    maxChordWidth: 3,
+    releaseGapMs: 70,
   },
 }
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))
 
-function selectNotes(notes: MusicalNote[], difficulty: Difficulty, beatMs: number) {
-  const config = CONFIG[difficulty]
-  const selected: MusicalNote[] = []
-  let previousTime = -Infinity
+function splitPhrases(notes: MusicalNote[], beatMs: number) {
+  const phrases: MusicalNote[][] = []
+  for (const note of [...notes].sort((a, b) => a.timeMs - b.timeMs)) {
+    const phrase = phrases.at(-1)
+    const previous = phrase?.at(-1)
+    const suppliedBoundary =
+      previous?.phraseId !== undefined && note.phraseId !== previous.phraseId
+    const derivedBoundary =
+      previous !== undefined &&
+      (note.timeMs - previous.timeMs > Math.max(650, beatMs * 1.5) ||
+        note.beatPosition - (phrase?.[0]?.beatPosition ?? note.beatPosition) >= 8)
 
+    if (!phrase || suppliedBoundary || derivedBoundary) phrases.push([note])
+    else phrase.push(note)
+  }
+  return phrases
+}
+
+function selectPhraseVoice(notes: MusicalNote[], previousVoice?: string) {
+  if (!notes.some((note) => note.voiceId)) return { notes, voice: previousVoice }
+
+  const voices = new Map<string, MusicalNote[]>()
   for (const note of notes) {
-    const gap = note.timeMs - previousTime
-    const onGrid =
-      Math.abs(note.beatPosition * config.subdivisions - Math.round(note.beatPosition * config.subdivisions)) <
-      0.16
-    const strongOffGrid = note.strength >= 0.8
-    const rescuesSilence = gap >= beatMs * config.rescueGapBeats
-
-    if (gap < config.minGapMs || (!onGrid && !strongOffGrid) || (note.strength < config.minStrength && !rescuesSilence)) {
-      continue
-    }
-
-    selected.push(note)
-    previousTime = note.timeMs
+    const voice = note.voiceId ?? 'unknown'
+    voices.set(voice, [...(voices.get(voice) ?? []), note])
   }
 
-  return selected
+  const selected = [...voices.entries()].sort(([voiceA, notesA], [voiceB, notesB]) => {
+    const score = (voice: string, voiceNotes: MusicalNote[]) =>
+      voiceNotes.reduce(
+        (total, note) =>
+          total + note.strength + (note.durationMs >= 200 ? 0.2 : 0) + (note.harmonicConfidence ?? 0) * 0.1,
+        voice === previousVoice ? 0.45 : 0,
+      )
+    return score(voiceB, notesB) - score(voiceA, notesA)
+  })[0]
+
+  return { voice: selected[0], notes: selected[1] }
 }
 
-const RIFF_SHAPES: Record<number, number[]> = {
-  3: [0, 1, 2, 1, 0, 1, 2, 1],
-  4: [0, 1, 2, 3, 2, 1, 0, 2, 3, 2, 1],
-  5: [0, 1, 2, 3, 4, 3, 2, 1, 0, 2, 4, 3, 1, 2],
+function eventImportance(note: MusicalNote, index: number, notes: MusicalNote[]) {
+  const phase = ((note.beatPosition % 1) + 1) % 1
+  const previous = notes[index - 1]
+  const next = notes[index + 1]
+  const isPeak =
+    previous !== undefined &&
+    next !== undefined &&
+    ((note.register > previous.register && note.register > next.register) ||
+      (note.register < previous.register && note.register < next.register))
+
+  return (
+    note.strength * 4 +
+    (note.durationMs >= 200 ? 1.5 : 0) +
+    (index === 0 ? 0.9 : 0) +
+    (index === notes.length - 1 ? 0.7 : 0) +
+    (Math.abs(phase - 0.5) < 0.13 ? 1.15 : 0) +
+    (phase > 0.13 && Math.abs(phase - 0.5) >= 0.13 && phase < 0.87 ? 0.65 : 0) +
+    (isPeak ? 0.55 : 0) +
+    (note.harmonicConfidence ?? 0) * 0.35
+  )
 }
 
-function laneFor(note: MusicalNote, index: number, previous: number, laneCount: number) {
-  const shape = RIFF_SHAPES[laneCount][index % RIFF_SHAPES[laneCount].length]
-  const contourNudge = index % 4 === 3 ? (note.register > 0.68 ? 1 : note.register < 0.2 ? -1 : 0) : 0
-  const target = clamp(shape + contourNudge, 0, laneCount - 1)
-  return clamp(target, previous - 1, previous + 1) as Lane
-}
+function selectEvents(notes: MusicalNote[], difficulty: Difficulty, beatMs: number) {
+  const config = CONFIG[difficulty]
+  const minimumGap = Math.max(config.minGapMs, beatMs * config.minGapBeats)
+  const ranked = notes
+    .map((note, index) => ({ note, index, score: eventImportance(note, index, notes) }))
+    .filter(
+      ({ note, index }) =>
+        note.strength >= config.minStrength ||
+        note.durationMs >= 200 ||
+        index === 0 ||
+        index === notes.length - 1,
+    )
+    .sort((a, b) => b.score - a.score || a.note.timeMs - b.note.timeMs)
 
-export class PlayableChartGenerator implements ChartGenerator {
-  generate(input: {
-    title: string
-    durationMs: number
-    bpm: number
-    beatOffsetMs: number
-    notes: MusicalNote[]
-  }): SongChart {
-    const beatMs = 60_000 / input.bpm
-    const tracks = {} as Record<Difficulty, DifficultyTrack>
-
-    for (const difficulty of DIFFICULTIES) {
-      const config = CONFIG[difficulty]
-      let previousLane = 0
-      const selected = selectNotes(input.notes, difficulty, beatMs)
-      const notes = selected.map((note, index): ChartNote => {
-        const lane = laneFor(note, index, previousLane, config.lanes)
-        previousLane = lane
-        const nearDownbeat = Math.abs(note.beatPosition - Math.round(note.beatPosition)) < 0.14
-        const chord = note.strength >= config.chordStrength && nearDownbeat
-        const secondLane = lane === config.lanes - 1 ? lane - 1 : lane + 1
-        const nextTime = selected[index + 1]?.timeMs ?? input.durationMs
-        const availableSustain = Math.max(0, nextTime - note.timeMs - config.minGapMs)
-        const durationMs =
-          note.durationMs >= config.minSustainMs
-            ? Math.round(Math.min(note.durationMs, availableSustain, beatMs * 3))
-            : 0
-
-        return {
-          timeMs: Math.round(note.timeMs),
-          durationMs,
-          lanes: (chord ? [lane, secondLane] : [lane]).sort((a, b) => a - b) as Lane[],
-          accent: note.strength >= 0.72,
-        }
-      })
-
-      tracks[difficulty] = { difficulty, notes }
+  const selected: MusicalNote[] = []
+  for (const { note } of ranked) {
+    if (selected.every((kept) => Math.abs(kept.timeMs - note.timeMs) >= minimumGap)) {
+      selected.push(note)
     }
+  }
+  return selected.sort((a, b) => a.timeMs - b.timeMs)
+}
 
-    return {
-      title: input.title,
-      durationMs: Math.round(input.durationMs),
-      bpm: Math.round(input.bpm * 10) / 10,
-      beatOffsetMs: Math.round(input.beatOffsetMs),
-      tracks,
-    }
+function pitchLevel(note: MusicalNote) {
+  return Math.round(clamp(note.register, 0, 1) * 12)
+}
+
+function motifKey(notes: MusicalNote[]) {
+  const intervals = notes.slice(1).map((note, index) =>
+    Math.round((note.beatPosition - notes[index].beatPosition) * 8),
+  )
+  const contour = notes.slice(1).map((note, index) =>
+    Math.sign(pitchLevel(note) - pitchLevel(notes[index])),
+  )
+  const harmony = notes.map((note) =>
+    note.harmonicConfidence === undefined
+      ? '?'
+      : note.harmonicConfidence >= 0.9
+        ? '3'
+        : note.harmonicConfidence >= 0.68
+          ? '2'
+          : '1',
+  )
+  return `${notes.length}|${intervals.join(',')}|${contour.join(',')}|${harmony.join('')}`
+}
+
+function mapPhraseLanes(
+  notes: MusicalNote[],
+  laneCount: number,
+  motifMappings: Map<string, Lane[]>,
+) {
+  const key = motifKey(notes)
+  const remembered = motifMappings.get(key)
+  if (remembered?.length === notes.length) return [...remembered]
+
+  const levels = notes.map(pitchLevel)
+  const uniqueLevels = [...new Set(levels)].sort((a, b) => a - b)
+  const start = uniqueLevels.length <= laneCount ? Math.floor((laneCount - uniqueLevels.length) / 2) : 0
+  const lanes = levels.map((level) => {
+    const rank = uniqueLevels.indexOf(level)
+    return (uniqueLevels.length <= laneCount ? start + rank : rank % laneCount) as Lane
+  })
+  motifMappings.set(key, lanes)
+  return lanes
+}
+
+function chordWidth(
+  note: MusicalNote,
+  difficulty: Difficulty,
+  index: number,
+  notes: MusicalNote[],
+  beatMs: number,
+) {
+  const config = CONFIG[difficulty]
+  const confidence = note.harmonicConfidence
+  if (
+    config.maxChordWidth === 1 ||
+    confidence === undefined ||
+    (note.mutedConfidence ?? 0) >= 0.5
+  ) {
+    return 1
+  }
+
+  if (difficulty === 'expert' && confidence >= 0.92 && note.strength >= 0.85) return 3
+  if (difficulty === 'medium') {
+    const previousGap = note.timeMs - (notes[index - 1]?.timeMs ?? -Infinity)
+    const nextGap = (notes[index + 1]?.timeMs ?? Infinity) - note.timeMs
+    return confidence >= 0.82 && Math.min(previousGap, nextGap) >= beatMs * 0.55 ? 2 : 1
+  }
+  return confidence >= (difficulty === 'hard' ? 0.72 : 0.68) ? 2 : 1
+}
+
+function lanesForChord(base: Lane, width: number, laneCount: number): Lane[] {
+  if (width === 1) return [base]
+  if (width === 2) {
+    const low = Math.min(base, laneCount - 2) as Lane
+    return [low, (low + 1) as Lane]
+  }
+  const center = clamp(base, 1, laneCount - 2)
+  return [(center - 1) as Lane, center as Lane, (center + 1) as Lane]
+}
+
+function articulationFor(
+  note: MusicalNote,
+  lanes: Lane[],
+  previous: { note: MusicalNote; lanes: Lane[] } | undefined,
+  difficulty: Difficulty,
+  beatMs: number,
+): NoteArticulation {
+  if (
+    difficulty === 'easy' ||
+    difficulty === 'medium' ||
+    lanes.length !== 1 ||
+    previous?.lanes.length !== 1 ||
+    (note.legatoConfidence ?? 0) < 0.65 ||
+    note.timeMs - previous.note.timeMs > beatMs * 0.55 ||
+    lanes[0] === previous.lanes[0]
+  ) {
+    return 'strum'
+  }
+  return 'hopo'
+}
+
+export function generateChart(input: {
+  durationMs: number
+  bpm: number
+  beatOffsetMs: number
+  notes: MusicalNote[]
+}): SongChart {
+  const beatMs = 60_000 / input.bpm
+  let previousVoice: string | undefined
+  const expertPhrases = splitPhrases(input.notes, beatMs).map((phrase) => {
+    const selectedVoice = selectPhraseVoice(phrase, previousVoice)
+    previousVoice = selectedVoice.voice
+    return selectEvents(selectedVoice.notes, 'expert', beatMs)
+  })
+  const tracks = {} as Record<Difficulty, DifficultyTrack>
+
+  for (const difficulty of DIFFICULTIES) {
+    const config = CONFIG[difficulty]
+    const motifMappings = new Map<string, Lane[]>()
+    const mapped = expertPhrases.flatMap((expertPhrase) => {
+      const notes = difficulty === 'expert' ? expertPhrase : selectEvents(expertPhrase, difficulty, beatMs)
+      const lanes = mapPhraseLanes(notes, config.lanes, motifMappings)
+      return notes.map((note, index) => ({ note, lane: lanes[index] }))
+    })
+    const mappedNotes = mapped.map((event) => event.note)
+    const mappedLanes = mapped.map(({ note, lane }, index) =>
+      lanesForChord(
+        lane,
+        Math.min(chordWidth(note, difficulty, index, mappedNotes, beatMs), config.maxChordWidth),
+        config.lanes,
+      ),
+    )
+
+    const notes = mapped.map(({ note }, index): ChartNote => {
+      const lanes = mappedLanes[index]
+      const nextTime = mapped[index + 1]?.note.timeMs ?? input.durationMs
+      const availableSustain = Math.max(0, nextTime - note.timeMs - config.releaseGapMs)
+      const candidateDuration = Math.round(Math.min(note.durationMs, availableSustain, beatMs * 4))
+      const durationMs = candidateDuration >= 200 ? candidateDuration : 0
+      const previous = mapped[index - 1]
+
+      return {
+        timeMs: Math.round(note.timeMs),
+        durationMs,
+        lanes,
+        accent: note.strength >= 0.72,
+        articulation: articulationFor(
+          note,
+          lanes,
+          previous ? { note: previous.note, lanes: mappedLanes[index - 1] } : undefined,
+          difficulty,
+          beatMs,
+        ),
+      }
+    })
+
+    tracks[difficulty] = { notes }
+  }
+
+  return {
+    durationMs: Math.round(input.durationMs),
+    bpm: Math.round(input.bpm * 10) / 10,
+    beatOffsetMs: Math.round(input.beatOffsetMs),
+    tracks,
   }
 }
 
@@ -187,20 +340,50 @@ export function validateChart(chart: SongChart): string[] {
   const errors: string[] = []
 
   for (const difficulty of DIFFICULTIES) {
-    let previousTime = -1
-    for (const [index, note] of chart.tracks[difficulty].notes.entries()) {
+    const track = chart.tracks[difficulty]
+    for (const [index, note] of track.notes.entries()) {
       const label = `${difficulty} note ${index + 1}`
+      const previous = track.notes[index - 1]
+      const next = track.notes[index + 1]
       if (!Number.isFinite(note.timeMs) || note.timeMs < 0 || note.timeMs > chart.durationMs) {
         errors.push(`${label} is outside the song`)
       }
-      if (note.timeMs < previousTime) errors.push(`${label} is out of order`)
+      if (previous && note.timeMs < previous.timeMs) errors.push(`${label} is out of order`)
       if (note.durationMs < 0 || note.timeMs + note.durationMs > chart.durationMs) {
         errors.push(`${label} has an invalid sustain`)
       }
-      if (note.lanes.length === 0 || new Set(note.lanes).size !== note.lanes.length || note.lanes.some((lane) => lane < 0 || lane > 4)) {
+      if (note.durationMs > 0 && note.durationMs < 200) errors.push(`${label} has a stumpy sustain`)
+      if (note.durationMs > 0 && next && next.timeMs - note.timeMs - note.durationMs < 60) {
+        errors.push(`${label} leaves too little sustain release space`)
+      }
+      if (
+        note.lanes.length === 0 ||
+        note.lanes.length > CONFIG[difficulty].maxChordWidth ||
+        new Set(note.lanes).size !== note.lanes.length ||
+        note.lanes.some((lane) => lane < 0 || lane >= CONFIG[difficulty].lanes)
+      ) {
         errors.push(`${label} has invalid lanes`)
       }
-      previousTime = note.timeMs
+      if (
+        note.articulation === 'hopo' &&
+        (difficulty === 'easy' ||
+          difficulty === 'medium' ||
+          (previous?.lanes.length === 1 && previous.lanes[0] === note.lanes[0]))
+      ) {
+        errors.push(`${label} has an invalid HOPO`)
+      }
+    }
+  }
+
+  const counts = DIFFICULTIES.map((difficulty) => chart.tracks[difficulty].notes.length)
+  if (counts.some((count, index) => index > 0 && count < counts[index - 1])) {
+    errors.push('difficulty event counts are not monotonic')
+  }
+
+  const expertOnsets = new Set(chart.tracks.expert.notes.map((note) => note.timeMs))
+  for (const difficulty of DIFFICULTIES.slice(0, -1)) {
+    if (chart.tracks[difficulty].notes.some((note) => !expertOnsets.has(note.timeMs))) {
+      errors.push(`${difficulty} contains an onset that is not in Expert`)
     }
   }
 

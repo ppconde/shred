@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { LocalChartPipeline } from './analysis/pipeline'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { processAudio } from './analysis/pipeline'
 import { downmixChannels } from './analysis/signal'
 import { Highway } from './components/Highway'
 import { Waveform } from './components/Waveform'
@@ -26,7 +26,6 @@ const titleFromFile = (name: string) => name.replace(/\.[^.]+$/, '').replace(/[_
 export default function App() {
   const audioRef = useRef<HTMLAudioElement>(null)
   const uploadSequence = useRef(0)
-  const pipeline = useMemo(() => new LocalChartPipeline(), [])
   const [audioUrl, setAudioUrl] = useState<string>()
   const [songTitle, setSongTitle] = useState('NO TRACK LOADED')
   const [duration, setDuration] = useState(0)
@@ -183,8 +182,8 @@ export default function App() {
       const samples = downmixChannels(
         Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel)),
       )
-      const result = await pipeline.process(
-        { title: titleFromFile(file.name), samples, sampleRate: buffer.sampleRate },
+      const result = await processAudio(
+        { samples, sampleRate: buffer.sampleRate },
         (analysisProgress) => {
           if (sequence === uploadSequence.current) setProgress(0.2 + analysisProgress * 0.72)
         },
@@ -272,9 +271,7 @@ export default function App() {
           <span className={`signal-lamp ${status}`} />
           <strong>{status === 'idle' ? 'STANDBY' : status.toUpperCase()}</strong>
           <span>{message}</span>
-          <div className="meter" aria-hidden="true">
-            <i style={{ width: `${progress * 100}%` }} />
-          </div>
+          <progress className="signal-progress" value={progress} max="1" aria-label="Analysis progress" />
         </section>
 
         <section className="transport metal-panel">

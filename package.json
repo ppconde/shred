@@ -10,15 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@react-three/fiber": "^9.8.1",
     "react": "latest",
-    "react-dom": "latest",
-    "three": "^0.182.0"
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@types/three": "^0.182.0",
     "@vitejs/plugin-react": "latest",
     "typescript": "latest",
     "vite": "latest",
