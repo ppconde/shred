@@ -1,4 +1,4 @@
-import type { AudioFeatures, TimedFeature } from './pipeline'
+import type { AudioFeatures, TimedFeature } from './transcribe'
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value))

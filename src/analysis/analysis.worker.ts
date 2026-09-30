@@ -1,4 +1,6 @@
+import { generateChart } from '../domain/chart'
 import { analyzeSignal } from './signal'
+import { transcribe } from './transcribe'
 
 type AnalysisRequest = { samples: Float32Array; sampleRate: number }
 type WorkerScope = {
@@ -13,7 +15,16 @@ scope.onmessage = ({ data }) => {
     const features = analyzeSignal(data.samples, data.sampleRate, (progress) => {
       scope.postMessage({ type: 'progress', progress })
     })
-    scope.postMessage({ type: 'result', features })
+    scope.postMessage({
+      type: 'result',
+      chart: generateChart({
+        durationMs: features.durationMs,
+        bpm: features.bpm,
+        beatOffsetMs: features.beatOffsetMs,
+        notes: transcribe(features),
+      }),
+      waveform: features.waveform,
+    })
   } catch (error) {
     scope.postMessage({
       type: 'error',

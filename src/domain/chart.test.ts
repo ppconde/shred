@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { transcribe, type AudioFeatures } from '../analysis/pipeline'
+import { transcribe, type AudioFeatures } from '../analysis/transcribe'
 import {
   DIFFICULTIES,
   generateChart,

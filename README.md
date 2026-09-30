@@ -35,14 +35,16 @@ The transport also provides seek, volume, and playback-speed controls. Click the
 
 ## Current architecture
 
-- `src/analysis/pipeline.ts` runs the worker, transcribes detected attacks, and passes format-neutral guitar events into generation. Beat confidence aligns real attacks but never fabricates notes.
-- `src/analysis/signal.ts` preserves both stereo channels in a mono analysis mix, applies a lightweight guitar-range filter, rejects out-of-range transients, estimates register, and finds pulse/attacks locally. `analysis.worker.ts` keeps the signal scan off the UI thread.
+- `src/analysis/pipeline.ts` is the browser-to-worker boundary. The worker owns evidence extraction, beat-locked transcription, and chart authoring, then returns a validated-format `SongChart` plus waveform without blocking the UI.
+- `src/analysis/signal.ts` preserves both stereo channels in a mono analysis mix, applies a lightweight guitar-range filter, rejects out-of-range transients, estimates register, and finds pulse/attacks locally. `transcribe.ts` keeps soft chord/ringing evidence attached to beat-grid events.
 - `src/domain/chart.ts` groups events into phrases, selects one known voice, remembers repeated-motif lane mappings, builds Expert, then musically selects and remaps each lower difficulty. It also owns chord, sustain, articulation, playability, and validation rules independent of serialization.
 - `src/components/Highway.tsx` and `Waveform.tsx` are lightweight Canvas2D views. Their playhead comes only from `HTMLAudioElement.currentTime`; they do not maintain a competing playback clock.
 
 The analyzer is intentionally lightweight rather than an ML transcription system. It favors a stable rhythmic interpretation, restrained density, quantization near the inferred beat grid, phrase contour, and repeated-riff consistency. Its guitar-focus pass suppresses much of the bass and cymbal range, but it is **not stem separation**: reliable guitar isolation from a finished mix needs a substantially larger ML/WASM source-separation model. A guitar stem or guitar-forward mix will produce the cleanest chart.
 
 The current signal pass cannot reliably separate guitar voices or identify muting and legato. It emits conservative harmony and ringing evidence for occasional chords and useful sustains, while unknown articulation remains strummed. Retained attacks are locked to the nearest straight-sixteenth or triplet subdivision of the inferred beat.
+
+The heuristic author is intentionally a local fallback, not the long-term quality ceiling. Its worker output already matches the boundary for a future compact learned joint-difficulty author: a model can replace evidence-to-chart decisions while the UI, `SongChart`, preview, and deterministic validator stay unchanged. Training that path first requires licensed audio paired with reviewed four-difficulty human charts; no speculative model runtime ships in this milestone.
 
 ## Milestone boundary
 
