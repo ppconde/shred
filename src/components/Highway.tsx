@@ -28,7 +28,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       context.scale(scale, scale)
 
       const { width, height } = bounds
-      const horizonY = 54
+      const horizonY = Math.max(110, height * 0.28)
       const hitY = height - 64
       const topLeft = width * 0.37
       const topRight = width * 0.63
@@ -48,13 +48,65 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       }
 
       const background = context.createLinearGradient(0, 0, 0, height)
-      background.addColorStop(0, '#1b0806')
-      background.addColorStop(0.45, '#090909')
-      background.addColorStop(1, '#020202')
+      background.addColorStop(0, '#162029')
+      background.addColorStop(0.38, '#0b0f14')
+      background.addColorStop(1, '#020305')
       context.fillStyle = background
       context.fillRect(0, 0, width, height)
 
-      context.fillStyle = '#070707'
+      // Show plane: restrained loading-dock truss, speakers, haze, and crowd silhouettes.
+      context.strokeStyle = '#4b5661'
+      context.lineWidth = 5
+      context.beginPath()
+      context.moveTo(0, 28)
+      context.lineTo(width, 28)
+      context.stroke()
+      context.lineWidth = 1
+      context.strokeStyle = 'rgba(174, 185, 194, .28)'
+      for (let x = 0; x < width; x += 44) {
+        context.beginPath()
+        context.moveTo(x, 18)
+        context.lineTo(x + 44, 38)
+        context.moveTo(x + 44, 18)
+        context.lineTo(x, 38)
+        context.stroke()
+      }
+
+      for (const light of [
+        { x: width * 0.22, color: 'rgba(53, 205, 224, .14)', lean: 1 },
+        { x: width * 0.78, color: 'rgba(255, 91, 46, .14)', lean: -1 },
+      ]) {
+        const beam = context.createLinearGradient(light.x, 26, light.x, horizonY)
+        beam.addColorStop(0, light.color)
+        beam.addColorStop(1, 'rgba(9, 10, 13, 0)')
+        context.fillStyle = beam
+        context.beginPath()
+        context.moveTo(light.x - 12, 30)
+        context.lineTo(light.x + 12, 30)
+        context.lineTo(light.x + light.lean * 80 + 115, horizonY)
+        context.lineTo(light.x + light.lean * 80 - 115, horizonY)
+        context.closePath()
+        context.fill()
+      }
+
+      context.fillStyle = '#0a0d11'
+      for (const x of [20, width - 72]) {
+        context.fillRect(x, horizonY - 82, 52, 82)
+        context.strokeStyle = '#343d47'
+        context.strokeRect(x + 4, horizonY - 77, 44, 34)
+        context.strokeRect(x + 4, horizonY - 38, 44, 33)
+      }
+      context.fillStyle = '#05070a'
+      for (let x = 0; x < width; x += 24) {
+        if (x > topLeft - 24 && x < topRight + 24) continue
+        const headY = horizonY - 8 - (x % 3) * 3
+        context.beginPath()
+        context.arc(x + 12, headY, 8, 0, Math.PI * 2)
+        context.fill()
+        context.fillRect(x + 4, headY + 5, 17, 14)
+      }
+
+      context.fillStyle = '#07090c'
       context.beginPath()
       context.moveTo(topLeft, horizonY)
       context.lineTo(topRight, horizonY)
@@ -72,7 +124,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
         const left = toPoint(0, timeMs)
         const right = toPoint(5, timeMs)
         if (left.progress < 0 || left.progress > 1.04) continue
-        context.strokeStyle = beat % 4 === 0 ? 'rgba(255,92,34,.48)' : 'rgba(255,255,255,.13)'
+        context.strokeStyle = beat % 4 === 0 ? 'rgba(255, 91, 46, .52)' : 'rgba(174, 185, 194, .16)'
         context.lineWidth = beat % 4 === 0 ? 2 : 1
         context.beginPath()
         context.moveTo(left.x, left.y)
@@ -83,7 +135,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       for (let lane = 0; lane <= 5; lane += 1) {
         const top = toPoint(lane, nowMs + lookAhead * 1_000)
         const bottom = toPoint(lane, nowMs)
-        context.strokeStyle = lane === 0 || lane === 5 ? '#6f6255' : 'rgba(176,165,147,.32)'
+        context.strokeStyle = lane === 0 || lane === 5 ? '#87939e' : 'rgba(120, 135, 148, .38)'
         context.lineWidth = lane === 0 || lane === 5 ? 3 : 1.5
         context.beginPath()
         context.moveTo(top.x, top.y)
@@ -137,9 +189,9 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
         }
       }
 
-      context.strokeStyle = '#f2e2bd'
+      context.strokeStyle = '#f1e7d2'
       context.lineWidth = 4
-      context.shadowColor = '#ff3b00'
+      context.shadowColor = '#35cde0'
       context.shadowBlur = 9
       context.beginPath()
       context.moveTo(bottomLeft, hitY)
@@ -150,7 +202,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       for (let lane = 0; lane < 5; lane += 1) {
         const point = toPoint(lane + 0.5, nowMs)
         const active = activeLanes[lane]
-        context.fillStyle = active ? LANE_COLORS[lane] : '#171412'
+        context.fillStyle = active ? LANE_COLORS[lane] : '#15191f'
         context.strokeStyle = active ? '#fff5d8' : LANE_COLORS[lane]
         context.lineWidth = active ? 4 : 2
         if (active) {
@@ -165,7 +217,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       }
 
       if (notes.length === 0) {
-        context.fillStyle = 'rgba(235,222,193,.65)'
+        context.fillStyle = 'rgba(241, 231, 210, .72)'
         context.font = '700 15px Impact, sans-serif'
         context.textAlign = 'center'
         context.fillText('DROP A TRACK TO IGNITE THE HIGHWAY', width / 2, height * 0.44)

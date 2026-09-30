@@ -27,7 +27,7 @@ export function Waveform({ samples, duration, currentTime, notes = [], onSeek }:
 
       const { width, height } = bounds
       const progress = duration > 0 ? currentTime / duration : 0
-      context.fillStyle = '#100d0c'
+      context.fillStyle = '#0c1015'
       context.fillRect(0, 0, width, height)
 
       context.strokeStyle = 'rgba(255,255,255,.08)'
@@ -40,7 +40,7 @@ export function Waveform({ samples, duration, currentTime, notes = [], onSeek }:
         context.stroke()
       }
 
-      context.fillStyle = 'rgba(231, 49, 25, .52)'
+      context.fillStyle = 'rgba(53, 205, 224, .48)'
       for (const note of notes) {
         const x = (note.timeMs / 1_000 / Math.max(duration, 1)) * width
         context.fillRect(x, 0, 1, height)
@@ -52,14 +52,14 @@ export function Waveform({ samples, duration, currentTime, notes = [], onSeek }:
         const x = index * barWidth
         const amplitude = Math.max(1.5, sample * (height - 12))
         const played = x / width <= progress
-        context.fillStyle = played ? '#f15a2a' : '#c9bfaa'
+        context.fillStyle = played ? '#ff5b2e' : '#aeb9c2'
         context.fillRect(x, center - amplitude / 2, Math.max(1, barWidth + 0.4), amplitude)
       })
 
       const playhead = Math.max(0, Math.min(width, progress * width))
-      context.shadowColor = '#ff3d00'
+      context.shadowColor = '#35cde0'
       context.shadowBlur = 10
-      context.fillStyle = '#fff2d3'
+      context.fillStyle = '#f1e7d2'
       context.fillRect(playhead - 1, 0, 2, height)
       context.shadowBlur = 0
     }
