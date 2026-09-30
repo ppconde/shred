@@ -5,6 +5,8 @@ export interface TimedFeature {
   strength: number
   register: number
   durationMs?: number
+  harmonicConfidence?: number
+  ringingConfidence?: number
 }
 
 export interface AudioFeatures {
@@ -63,23 +65,37 @@ export function transcribe(features: AudioFeatures): MusicalNote[] {
     }
   }
 
-  return deduplicated.map((feature, index) => {
-    const gridIndex = Math.round((feature.timeMs - features.beatOffsetMs) / sixteenthMs)
-    const gridTime = features.beatOffsetMs + gridIndex * sixteenthMs
-    const snapTolerance = Math.min(36, sixteenthMs * 0.24)
-    const timeMs = Math.abs(feature.timeMs - gridTime) <= snapTolerance ? gridTime : feature.timeMs
-    const nextTime = deduplicated[index + 1]?.timeMs ?? features.durationMs
-
-    return {
-      timeMs: clamp(timeMs, 0, features.durationMs),
-      durationMs: feature.durationMs
-        ? Math.min(feature.durationMs, Math.max(0, nextTime - timeMs - 90))
-        : 0,
-      strength: clamp(feature.strength, 0, 1),
-      register: clamp(feature.register, 0, 1),
-      beatPosition: (timeMs - features.beatOffsetMs) / beatMs,
+  const quantized: TimedFeature[] = []
+  for (const feature of deduplicated) {
+    const straightTime =
+      features.beatOffsetMs +
+      Math.round((feature.timeMs - features.beatOffsetMs) / sixteenthMs) * sixteenthMs
+    const tripletStep = beatMs / 3
+    const tripletTime =
+      features.beatOffsetMs +
+      Math.round((feature.timeMs - features.beatOffsetMs) / tripletStep) * tripletStep
+    const timeMs =
+      Math.abs(feature.timeMs - tripletTime) < Math.abs(feature.timeMs - straightTime)
+        ? tripletTime
+        : straightTime
+    const candidate = { ...feature, timeMs: clamp(timeMs, 0, features.durationMs) }
+    const previous = quantized.at(-1)
+    if (previous && Math.abs(previous.timeMs - candidate.timeMs) < 0.5) {
+      if (candidate.strength > previous.strength) quantized[quantized.length - 1] = candidate
+    } else {
+      quantized.push(candidate)
     }
-  })
+  }
+
+  return quantized.map((feature) => ({
+    timeMs: feature.timeMs,
+    durationMs: feature.durationMs ?? 0,
+    strength: clamp(feature.strength, 0, 1),
+    register: clamp(feature.register, 0, 1),
+    beatPosition: (feature.timeMs - features.beatOffsetMs) / beatMs,
+    harmonicConfidence: feature.harmonicConfidence,
+    ringingConfidence: feature.ringingConfidence,
+  }))
 }
 
 export async function processAudio(

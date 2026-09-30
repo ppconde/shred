@@ -61,6 +61,8 @@ describe('guitar-focused signal analysis', () => {
     }
     expect(attacks).toHaveLength(guitarTimes.length)
     expect(attacks.every((attack) => attack.register > 0.25 && attack.register < 0.5)).toBe(true)
+    expect(attacks.every((attack) => attack.harmonicConfidence === undefined)).toBe(true)
+    expect(attacks.some((attack) => (attack.ringingConfidence ?? 0) >= 0.5)).toBe(true)
     expect(attacks.filter((attack) => guitarTimes.every((time) => Math.abs(attack.timeMs - time * 1_000) >= 90))).toHaveLength(0)
   })
 })

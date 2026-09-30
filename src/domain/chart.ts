@@ -13,6 +13,7 @@ export interface MusicalNote {
   beatPosition: number
   voiceId?: string
   harmonicConfidence?: number
+  ringingConfidence?: number
   mutedConfidence?: number
   legatoConfidence?: number
   phraseId?: string | number
@@ -116,13 +117,17 @@ function selectPhraseVoice(notes: MusicalNote[], previousVoice?: string) {
     const score = (voice: string, voiceNotes: MusicalNote[]) =>
       voiceNotes.reduce(
         (total, note) =>
-          total + note.strength + (note.durationMs >= 200 ? 0.2 : 0) + (note.harmonicConfidence ?? 0) * 0.1,
+          total + note.strength + (hasUsefulSustain(note) ? 0.2 : 0) + (note.harmonicConfidence ?? 0) * 0.1,
         voice === previousVoice ? 0.45 : 0,
       )
     return score(voiceB, notesB) - score(voiceA, notesA)
   })[0]
 
   return { voice: selected[0], notes: selected[1] }
+}
+
+function hasUsefulSustain(note: MusicalNote) {
+  return note.durationMs >= 200 && (note.ringingConfidence ?? 0) >= 0.5
 }
 
 function eventImportance(note: MusicalNote, index: number, notes: MusicalNote[]) {
@@ -137,7 +142,7 @@ function eventImportance(note: MusicalNote, index: number, notes: MusicalNote[])
 
   return (
     note.strength * 4 +
-    (note.durationMs >= 200 ? 1.5 : 0) +
+    (hasUsefulSustain(note) ? 1.5 : 0) +
     (index === 0 ? 0.9 : 0) +
     (index === notes.length - 1 ? 0.7 : 0) +
     (Math.abs(phase - 0.5) < 0.13 ? 1.15 : 0) +
@@ -155,7 +160,7 @@ function selectEvents(notes: MusicalNote[], difficulty: Difficulty, beatMs: numb
     .filter(
       ({ note, index }) =>
         note.strength >= config.minStrength ||
-        note.durationMs >= 200 ||
+        hasUsefulSustain(note) ||
         index === 0 ||
         index === notes.length - 1,
     )
@@ -343,7 +348,9 @@ export function generateChart(input: {
       const lanes = mappedLanes[index]
       const nextTime = mapped[index + 1]?.note.timeMs ?? input.durationMs
       const availableSustain = Math.max(0, nextTime - note.timeMs - config.releaseGapMs)
-      const candidateDuration = Math.round(Math.min(note.durationMs, availableSustain, beatMs * 4))
+      const candidateDuration = hasUsefulSustain(note)
+        ? Math.round(Math.min(note.durationMs, availableSustain, beatMs * 4))
+        : 0
       const durationMs = candidateDuration >= 200 ? candidateDuration : 0
       const previous = mapped[index - 1]
 

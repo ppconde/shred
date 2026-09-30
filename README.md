@@ -42,7 +42,7 @@ The transport also provides seek, volume, and playback-speed controls. Click the
 
 The analyzer is intentionally lightweight rather than an ML transcription system. It favors a stable rhythmic interpretation, restrained density, quantization near the inferred beat grid, phrase contour, and repeated-riff consistency. Its guitar-focus pass suppresses much of the bass and cymbal range, but it is **not stem separation**: reliable guitar isolation from a finished mix needs a substantially larger ML/WASM source-separation model. A guitar stem or guitar-forward mix will produce the cleanest chart.
 
-The current signal pass cannot reliably identify separate guitar voices, full-harmony attacks, muting, or legato. Those event fields stay unknown in normal uploads, so generation does not invent chords or HOPOs; the phrase/voice/chord/articulation rules activate only when a future analyzer supplies evidence.
+The current signal pass cannot reliably separate guitar voices or identify muting and legato. It emits conservative harmony and ringing evidence for occasional chords and useful sustains, while unknown articulation remains strummed. Retained attacks are locked to the nearest straight-sixteenth or triplet subdivision of the inferred beat.
 
 ## Milestone boundary
 

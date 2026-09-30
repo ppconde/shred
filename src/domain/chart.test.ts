@@ -110,7 +110,7 @@ describe('generateChart', () => {
 
   it('repairs sustains and only marks evidenced, different-lane legato as HOPO', () => {
     const sustained = chartFor([
-      note(0, 0.2, 0.9, { durationMs: 430 }),
+      note(0, 0.2, 0.9, { durationMs: 430, ringingConfidence: 0.9 }),
       note(600, 0.5, 0.9),
     ], 1_500)
     for (const difficulty of DIFFICULTIES) {
@@ -141,7 +141,7 @@ describe('transcribe', () => {
       bpm: 120,
       beatOffsetMs: 20,
       attacks: [
-        { timeMs: 31, strength: 0.9, register: 0.2 },
+        { timeMs: 31, durationMs: 500, strength: 0.9, register: 0.2, harmonicConfidence: 0.9 },
         { timeMs: 205, strength: 0.8, register: 0.5 },
         { timeMs: 418, strength: 0.7, register: 0.8 },
       ],
@@ -149,7 +149,16 @@ describe('transcribe', () => {
     }
 
     const notes = transcribe(features)
-    expect(notes.map((event) => event.timeMs)).toEqual([20, 205, 395])
+    expect(notes.map((event) => Math.round(event.timeMs))).toEqual([20, 187, 395])
+    expect(notes[0].durationMs).toBe(500)
+    expect(notes[0].harmonicConfidence).toBe(0.9)
+    expect(
+      notes.every((event) =>
+        [3, 4].some(
+          (division) => Math.abs(event.beatPosition * division - Math.round(event.beatPosition * division)) < 0.0001,
+        ),
+      ),
+    ).toBe(true)
     expect(notes[0].beatPosition).toBe(0)
     expect(notes.every((event) => !('lanes' in event))).toBe(true)
   })

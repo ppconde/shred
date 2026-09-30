@@ -252,11 +252,34 @@ export function analyzeSignal(
     const maximumEnd = Math.min(frameCount, frame + Math.round(framesPerSecond * 1.8))
     while (sustainEnd < maximumEnd && energy[sustainEnd] >= sustainFloor) sustainEnd += 1
 
+    const durationMs = ((sustainEnd - frame) / framesPerSecond) * 1_000
+    const probeEnd = Math.min(sustainEnd, frame + Math.round(framesPerSecond * 0.28))
+    let strongestRetrigger = 0
+    for (let probe = frame + 2; probe < probeEnd; probe += 1) {
+      strongestRetrigger = Math.max(strongestRetrigger, flux[probe])
+    }
+    const ringingConfidence =
+      durationMs >= 200
+        ? clamp(1 - strongestRetrigger / Math.max(flux[frame], maxFlux * 0.03), 0, 1)
+        : 0
+    const strength = clamp(envelope[frame] * (0.7 + Math.min(guitarShare, 1) * 0.3), 0, 1)
+    const harmonicRatio = pitch.crossingPitchHz / Math.max(pitch.pitchHz, 1)
+    const harmonicConfidence =
+      strength >= 0.65 &&
+      durationMs >= 200 &&
+      pitch.confidence >= 0.45 &&
+      harmonicRatio >= 1.35 &&
+      harmonicRatio <= 3.5
+        ? clamp(0.62 + (harmonicRatio - 1.35) * 0.12 + strength * 0.15, 0, 0.95)
+        : undefined
+
     attacks.push({
       timeMs: (frame / framesPerSecond) * 1_000,
-      durationMs: ((sustainEnd - frame) / framesPerSecond) * 1_000,
-      strength: clamp(envelope[frame] * (0.7 + Math.min(guitarShare, 1) * 0.3), 0, 1),
+      durationMs,
+      strength,
       register,
+      harmonicConfidence,
+      ringingConfidence,
     })
     lastPeak = frame
   }
