@@ -1,7 +1,18 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { ChartNote } from '../domain/chart'
 
 const LANE_COLORS = ['#30d158', '#ff453a', '#ffd60a', '#0a84ff', '#ff8a00']
+const LOOK_AHEAD_SECONDS = 4.2
+
+export function fretHalfHeight(radius: number, nearestGapMs: number, travelHeight: number) {
+  if (!Number.isFinite(nearestGapMs)) return radius * 0.62
+  const projectedGap = (nearestGapMs / 1_000 / LOOK_AHEAD_SECONDS) * travelHeight
+  return Math.min(radius * 0.62, Math.max(2, projectedGap * 0.38))
+}
+
+export function fretHalfWidth(radius: number, laneWidth: number) {
+  return Math.min(radius * 1.12, laneWidth * 0.38)
+}
 
 interface HighwayProps {
   notes: ChartNote[]
@@ -13,6 +24,15 @@ interface HighwayProps {
 
 export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: HighwayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const noteSpacing = useMemo(() => {
+    const times = [...new Set(notes.map((note) => note.timeMs))].sort((a, b) => a - b)
+    return new Map(
+      times.map((time, index) => [
+        time,
+        Math.min(time - (times[index - 1] ?? -Infinity), (times[index + 1] ?? Infinity) - time),
+      ]),
+    )
+  }, [notes])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -34,7 +54,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       const topRight = width * 0.63
       const bottomLeft = 22
       const bottomRight = width - 22
-      const lookAhead = 4.2
+      const lookAhead = LOOK_AHEAD_SECONDS
       const nowMs = currentTime * 1_000
       const toPoint = (lanePosition: number, timeMs: number) => {
         const progress = 1 - (timeMs / 1_000 - currentTime) / lookAhead
@@ -43,6 +63,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
         return {
           x: left + (lanePosition / 5) * (right - left),
           y: horizonY + (hitY - horizonY) * progress,
+          laneWidth: (right - left) / 5,
           progress,
         }
       }
@@ -152,6 +173,13 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
           const center = toPoint(lane + 0.5, note.timeMs)
           if (center.progress < 0 || center.progress > 1.08) continue
           const radius = Math.max(6, 8 + center.progress * 12)
+          const halfHeight = fretHalfHeight(
+            radius,
+            noteSpacing.get(note.timeMs) ?? Infinity,
+            hitY - horizonY,
+          )
+          const halfWidth = fretHalfWidth(radius, center.laneWidth)
+          const rimPadding = Math.min(2.5, halfHeight * 0.25)
 
           if (note.durationMs > 0) {
             const end = toPoint(lane + 0.5, note.timeMs + note.durationMs)
@@ -165,22 +193,35 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
 
           context.shadowColor = LANE_COLORS[lane]
           context.shadowBlur = note.accent ? radius * 1.25 : radius * 0.5
-          context.fillStyle = LANE_COLORS[lane]
-          context.strokeStyle = '#0a0908'
-          context.lineWidth = Math.max(2, radius * 0.22)
+          context.fillStyle = '#030405'
           context.beginPath()
-          context.ellipse(center.x, center.y, radius * 1.18, radius * 0.62, 0, 0, Math.PI * 2)
+          context.ellipse(
+            center.x,
+            center.y,
+            Math.min(radius * 1.3, center.laneWidth * 0.44),
+            halfHeight + rimPadding,
+            0,
+            0,
+            Math.PI * 2,
+          )
+          context.fill()
+
+          context.fillStyle = LANE_COLORS[lane]
+          context.strokeStyle = '#f1e7d2'
+          context.lineWidth = Math.max(1.5, radius * 0.12)
+          context.beginPath()
+          context.ellipse(center.x, center.y, halfWidth, halfHeight, 0, 0, Math.PI * 2)
           context.fill()
           context.stroke()
           context.shadowBlur = 0
 
-          context.fillStyle = 'rgba(255,255,255,.72)'
+          context.fillStyle = 'rgba(255,255,255,.78)'
           context.beginPath()
           context.ellipse(
-            center.x - radius * 0.25,
-            center.y - radius * 0.18,
-            radius * 0.34,
-            radius * 0.14,
+            center.x - halfWidth * 0.22,
+            center.y - halfHeight * 0.28,
+            halfWidth * 0.28,
+            Math.max(1.2, halfHeight * 0.2),
             0,
             0,
             Math.PI * 2,
@@ -202,6 +243,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       for (let lane = 0; lane < 5; lane += 1) {
         const point = toPoint(lane + 0.5, nowMs)
         const active = activeLanes[lane]
+        const receptorWidth = Math.min(active ? 31 : 27, point.laneWidth * 0.4)
         context.fillStyle = active ? LANE_COLORS[lane] : '#15191f'
         context.strokeStyle = active ? '#fff5d8' : LANE_COLORS[lane]
         context.lineWidth = active ? 4 : 2
@@ -210,7 +252,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
           context.shadowBlur = 22
         }
         context.beginPath()
-        context.ellipse(point.x, hitY, active ? 31 : 27, active ? 16 : 14, 0, 0, Math.PI * 2)
+        context.ellipse(point.x, hitY, receptorWidth, receptorWidth * 0.52, 0, 0, Math.PI * 2)
         context.fill()
         context.stroke()
         context.shadowBlur = 0
@@ -228,7 +270,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
     const observer = new ResizeObserver(draw)
     observer.observe(canvas)
     return () => observer.disconnect()
-  }, [activeLanes, beatOffset, bpm, currentTime, notes])
+  }, [activeLanes, beatOffset, bpm, currentTime, noteSpacing, notes])
 
   return (
     <canvas
