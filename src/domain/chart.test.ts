@@ -167,3 +167,52 @@ describe('transcribe', () => {
     expect(transcribe({ durationMs: 2_000, bpm: 120, beatOffsetMs: 0, attacks: [], waveform: [] })).toEqual([])
   })
 })
+
+describe('end-to-end HOPO detection from real audio', () => {
+  it('derives a hopo articulation from a synthesized hammer-on, not just synthetic fixtures', async () => {
+    const { analyzeSignal } = await import('../analysis/signal')
+    const SAMPLE_RATE = 44_100
+
+    const addBurst = (
+      samples: Float32Array,
+      time: number,
+      frequency: number,
+      gain: number,
+      decay: number,
+    ) => {
+      const start = Math.round(time * SAMPLE_RATE)
+      const length = Math.round(0.22 * SAMPLE_RATE)
+      for (let offset = 0; offset < length && start + offset < samples.length; offset += 1) {
+        const age = offset / SAMPLE_RATE
+        samples[start + offset] +=
+          Math.sin(2 * Math.PI * frequency * age) * gain * Math.exp(-age * decay)
+      }
+    }
+
+    const samples = new Float32Array(SAMPLE_RATE * 4)
+    // Beat-locking percussion so bpm/beatOffset are stable.
+    for (const time of [0.25, 0.75, 1.25, 1.75, 2.25, 2.75, 3.25]) {
+      addBurst(samples, time, 45, 0.95, 20)
+    }
+    // A hard picked note followed shortly after by a softer, nearby-register re-attack:
+    // the acoustic signature of a hammer-on/pull-off rather than a fresh pick.
+    addBurst(samples, 1.0, 143, 0.4, 15)
+    addBurst(samples, 1.12, 199, 0.15, 0.5)
+
+    const features = analyzeSignal(samples, SAMPLE_RATE)
+    expect(features.attacks.some((attack) => (attack.legatoConfidence ?? 0) >= 0.65)).toBe(true)
+
+    const notes = transcribe(features)
+    expect(notes.some((note) => (note.legatoConfidence ?? 0) >= 0.65)).toBe(true)
+
+    const chart = generateChart({
+      durationMs: features.durationMs,
+      bpm: features.bpm,
+      beatOffsetMs: features.beatOffsetMs,
+      notes,
+    })
+
+    expect(chart.tracks.expert.notes.some((event) => event.articulation === 'hopo')).toBe(true)
+    expect(validateChart(chart)).toEqual([])
+  })
+})
