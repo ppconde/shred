@@ -302,6 +302,7 @@ export default function App() {
             <span>{formatTime(currentTime)}</span>
             <input
               type="range"
+              name="position"
               min="0"
               max={duration || 0}
               step="0.01"
@@ -316,6 +317,7 @@ export default function App() {
             <span>VOLUME</span>
             <input
               type="range"
+              name="volume"
               min="0"
               max="1"
               step="0.01"
@@ -325,7 +327,7 @@ export default function App() {
           </label>
           <label className="speed-control">
             <span>SPEED</span>
-            <select value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
+            <select name="speed" value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
               <option value="0.5">50%</option>
               <option value="0.75">75%</option>
               <option value="1">100%</option>
