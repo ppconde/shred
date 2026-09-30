@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LocalChartPipeline } from './analysis/pipeline'
+import { downmixChannels } from './analysis/signal'
 import { Highway } from './components/Highway'
 import { Waveform } from './components/Waveform'
 import {
@@ -178,8 +179,10 @@ export default function App() {
       setDuration(buffer.duration)
       setStatus('analyzing')
       setProgress(0.2)
-      setMessage('Finding attacks, pulse, and playable rhythmic shapes…')
-      const samples = new Float32Array(buffer.getChannelData(0))
+      setMessage('Focusing the guitar range and tracing playable attacks…')
+      const samples = downmixChannels(
+        Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel)),
+      )
       const result = await pipeline.process(
         { title: titleFromFile(file.name), samples, sampleRate: buffer.sampleRate },
         (analysisProgress) => {

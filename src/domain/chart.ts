@@ -9,6 +9,7 @@ export interface MusicalNote {
   durationMs: number
   strength: number
   register: number
+  pitchHz?: number
   beatPosition: number
 }
 

@@ -38,14 +38,12 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
       const nowMs = currentTime * 1_000
       const toPoint = (lanePosition: number, timeMs: number) => {
         const progress = 1 - (timeMs / 1_000 - currentTime) / lookAhead
-        const perspective = Math.pow(Math.max(0, progress), 1.32)
-        const left = topLeft + (bottomLeft - topLeft) * perspective
-        const right = topRight + (bottomRight - topRight) * perspective
+        const left = topLeft + (bottomLeft - topLeft) * progress
+        const right = topRight + (bottomRight - topRight) * progress
         return {
           x: left + (lanePosition / 5) * (right - left),
-          y: horizonY + (hitY - horizonY) * perspective,
+          y: horizonY + (hitY - horizonY) * progress,
           progress,
-          width: right - left,
         }
       }
 
@@ -101,7 +99,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
         for (const lane of note.lanes) {
           const center = toPoint(lane + 0.5, note.timeMs)
           if (center.progress < 0 || center.progress > 1.08) continue
-          const radius = Math.max(3, 5 + center.progress * 11)
+          const radius = Math.max(6, 8 + center.progress * 12)
 
           if (note.durationMs > 0) {
             const end = toPoint(lane + 0.5, note.timeMs + note.durationMs)
@@ -160,7 +158,7 @@ export function Highway({ notes, currentTime, bpm, beatOffset, activeLanes }: Hi
           context.shadowBlur = 22
         }
         context.beginPath()
-        context.ellipse(point.x, hitY, 18, 9, 0, 0, Math.PI * 2)
+        context.ellipse(point.x, hitY, active ? 31 : 27, active ? 16 : 14, 0, 0, Math.PI * 2)
         context.fill()
         context.stroke()
         context.shadowBlur = 0

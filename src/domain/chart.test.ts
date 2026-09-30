@@ -54,7 +54,7 @@ describe('PlayableChartGenerator', () => {
 })
 
 describe('RhythmicTranscriber', () => {
-  it('adds confident beat pulses, quantizes nearby attacks, and stays format-neutral', () => {
+  it('quantizes detected guitar attacks and stays format-neutral', () => {
     const features: AudioFeatures = {
       durationMs: 2_000,
       bpm: 120,
@@ -63,17 +63,24 @@ describe('RhythmicTranscriber', () => {
         { timeMs: 31, strength: 0.9, register: 0.2 },
         { timeMs: 418, strength: 0.7, register: 0.8 },
       ],
-      beats: [
-        { timeMs: 20, strength: 0.8, register: 0.3 },
-        { timeMs: 520, strength: 0.65, register: 0.4 },
-        { timeMs: 1_020, strength: 0.1, register: 0.5 },
-      ],
       waveform: [],
     }
 
     const notes = new RhythmicTranscriber().transcribe(features)
-    expect(notes.map((note) => note.timeMs)).toEqual([20, 395, 520])
+    expect(notes.map((note) => note.timeMs)).toEqual([20, 395])
     expect(notes[0].beatPosition).toBe(0)
     expect(notes.every((note) => !('lanes' in note))).toBe(true)
+  })
+
+  it('does not invent guitar notes when analysis detects no attacks', () => {
+    const notes = new RhythmicTranscriber().transcribe({
+      durationMs: 2_000,
+      bpm: 120,
+      beatOffsetMs: 0,
+      attacks: [],
+      waveform: [],
+    })
+
+    expect(notes).toEqual([])
   })
 })

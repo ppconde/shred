@@ -9,6 +9,8 @@ export interface TimedFeature {
   timeMs: number
   strength: number
   register: number
+  pitchHz?: number
+  durationMs?: number
 }
 
 export interface AudioFeatures {
@@ -16,7 +18,6 @@ export interface AudioFeatures {
   bpm: number
   beatOffsetMs: number
   attacks: TimedFeature[]
-  beats: TimedFeature[]
   waveform: number[]
 }
 
@@ -76,14 +77,8 @@ export class RhythmicTranscriber implements NoteTranscriber {
   transcribe(features: AudioFeatures): MusicalNote[] {
     const beatMs = 60_000 / features.bpm
     const sixteenthMs = beatMs / 4
-    const candidates = [...features.attacks]
-
-    for (const beat of features.beats) {
-      const nearbyAttack = candidates.some((attack) => Math.abs(attack.timeMs - beat.timeMs) < 85)
-      if (beat.strength >= 0.24 && !nearbyAttack) candidates.push(beat)
-    }
-
-    candidates.sort((a, b) => a.timeMs - b.timeMs)
+    // Beat confidence aligns real attacks; it must never invent a guitar line from drums.
+    const candidates = [...features.attacks].sort((a, b) => a.timeMs - b.timeMs)
     const deduplicated: TimedFeature[] = []
     for (const candidate of candidates) {
       const previous = deduplicated.at(-1)
@@ -103,9 +98,10 @@ export class RhythmicTranscriber implements NoteTranscriber {
 
       return {
         timeMs: clamp(timeMs, 0, features.durationMs),
-        durationMs: feature.strength >= 0.62 && gap >= 330 ? Math.min(1_400, gap - 90) : 0,
+        durationMs: feature.durationMs ? Math.min(feature.durationMs, Math.max(0, gap - 90)) : 0,
         strength: clamp(feature.strength, 0, 1),
         register: clamp(feature.register, 0, 1),
+        pitchHz: feature.pitchHz,
         beatPosition: (timeMs - features.beatOffsetMs) / beatMs,
       }
     })
