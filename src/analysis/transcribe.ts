@@ -7,6 +7,7 @@ export interface TimedFeature {
   durationMs?: number
   harmonicConfidence?: number
   ringingConfidence?: number
+  legatoConfidence?: number
 }
 
 export interface AudioFeatures {
@@ -65,5 +66,6 @@ export function transcribe(features: AudioFeatures): MusicalNote[] {
     beatPosition: (feature.timeMs - features.beatOffsetMs) / beatMs,
     harmonicConfidence: feature.harmonicConfidence,
     ringingConfidence: feature.ringingConfidence,
+    legatoConfidence: feature.legatoConfidence,
   }))
 }

@@ -217,7 +217,9 @@ export function analyzeSignal(
   const attacks: TimedFeature[] = []
   const localRadius = Math.max(3, Math.round(framesPerSecond * 0.11))
   const minimumGapFrames = Math.round(framesPerSecond * 0.072)
+  const beatMs = 60_000 / bpm
   let lastPeak = -minimumGapFrames
+  let previousAttackHardness = 0
 
   for (let frame = 1; frame < frameCount - 1; frame += 1) {
     let localMean = 0
@@ -273,14 +275,34 @@ export function analyzeSignal(
         ? clamp(0.62 + (harmonicRatio - 1.35) * 0.12 + strength * 0.15, 0, 0.95)
         : undefined
 
+    // A hammer-on/pull-off re-pitches an already-ringing string instead of striking it again, so
+    // its onset is markedly softer (lower flux relative to sustained energy) than a picked attack,
+    // and it lands soon after the previous note on a nearby fret.
+    const attackHardness = flux[frame] / Math.max(energy[frame], 0.00001)
+    const previousAttack = attacks.at(-1)
+    const timeMs = (frame / framesPerSecond) * 1_000
+    const gapMs = previousAttack ? timeMs - previousAttack.timeMs : Infinity
+    const registerDelta = previousAttack ? Math.abs(register - previousAttack.register) : Infinity
+    const legatoConfidence =
+      previousAttack &&
+      gapMs > 0 &&
+      gapMs <= beatMs * 0.6 &&
+      registerDelta > 0.008 &&
+      registerDelta <= 0.12 &&
+      attackHardness < previousAttackHardness * 0.85
+        ? clamp(0.65 + (1 - attackHardness / Math.max(previousAttackHardness, 0.00001)) * 0.3, 0, 0.95)
+        : undefined
+
     attacks.push({
-      timeMs: (frame / framesPerSecond) * 1_000,
+      timeMs,
       durationMs,
       strength,
       register,
       harmonicConfidence,
       ringingConfidence,
+      legatoConfidence,
     })
+    previousAttackHardness = attackHardness
     lastPeak = frame
   }
 
